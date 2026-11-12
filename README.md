@@ -71,16 +71,14 @@
 
 ### 📊 GitHub Activity & Statistics
 
-<div align="center">
-  <img src="https://github-readme-stats.vercel.app/api?username=resaldo&show_icons=true&theme=tokyonight&hide_border=true&count_private=true" width="48%" alt="GitHub Stats" />
-  <img src="https://github-readme-stats.vercel.app/api/top-langs/?username=resaldo&layout=compact&theme=tokyonight&hide_border=true" width="48%" alt="Top Languages" />
-</div>
+<p align="center">
+  <img height="185" src="https://github-readme-stats-eight-xi.vercel.app/api?username=resaldo&show_icons=true&theme=tokyonight&hide_border=true&count_private=true" alt="GitHub Stats" />
+  <img height="185" src="https://github-readme-stats-eight-xi.vercel.app/api/top-langs/?username=resaldo&layout=compact&theme=tokyonight&hide_border=true" alt="Top Languages" />
+</p>
 
-<br />
-
-<div align="center">
-  <img src="https://github-readme-streak-stats.herokuapp.com/?user=resaldo&theme=tokyonight&hide_border=true" width="97%" alt="GitHub Streak" />
-</div>
+<p align="center">
+  <img src="https://streak-stats.demolab.com/?user=resaldo&theme=tokyonight&hide_border=true" alt="GitHub Streak" />
+</p>
 
 ---
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-  # Hi there, I'm Gosaldo 👋
+  # Hi there, I'm Gadun 👋
   ### Algorithmic Trading Engineer & Full-Stack Automation Specialist
 
   <p align="center">
@@ -72,12 +72,12 @@
 ### 📊 GitHub Activity & Statistics
 
 <p align="center">
-  <img height="185" src="https://github-readme-stats-eight-xi.vercel.app/api?username=gosaldo&show_icons=true&theme=tokyonight&hide_border=true&count_private=true" alt="GitHub Stats" />
-  <img height="185" src="https://github-readme-stats-eight-xi.vercel.app/api/top-langs/?username=gosaldo&layout=compact&theme=tokyonight&hide_border=true" alt="Top Languages" />
+  <img height="185" src="https://github-readme-stats-eight-xi.vercel.app/api?username=gadun&show_icons=true&theme=tokyonight&hide_border=true&count_private=true" alt="GitHub Stats" />
+  <img height="185" src="https://github-readme-stats-eight-xi.vercel.app/api/top-langs/?username=gadun&layout=compact&theme=tokyonight&hide_border=true" alt="Top Languages" />
 </p>
 
 <p align="center">
-  <img src="https://streak-stats.demolab.com/?user=gosaldo&theme=tokyonight&hide_border=true" alt="GitHub Streak" />
+  <img src="https://streak-stats.demolab.com/?user=gadun&theme=tokyonight&hide_border=true" alt="GitHub Streak" />
 </p>
 
 ---

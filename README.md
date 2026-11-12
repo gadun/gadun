@@ -94,5 +94,5 @@
 ### 🤝 Let's Collaborate or Hire Me
 I am open to freelance contracts, bespoke EA development, and SaaS partnerships.
 * **Email**: [ringinbambu@gmail.com](mailto:ringinbambu@gmail.com)
-* **Telegram**: [@dotmie](https://t.me/)
+* **Telegram**: [@resaldo](https://t.me/resaldo)
 * **Upwork / MQL5 Freelance**: Available upon request

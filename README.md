@@ -1,6 +1,6 @@
 <div align="center">
 
-  # Hi there, I'm Resaldo 👋
+  # Hi there, I'm Gosaldo 👋
   ### Algorithmic Trading Engineer & Full-Stack Automation Specialist
 
   <p align="center">
@@ -9,7 +9,7 @@
 
   <p align="center">
     <a href="mailto:ringinbambu@gmail.com"><img src="https://img.shields.io/badge/Contact-Hire_Me-0078D4?style=for-the-badge&logo=microsoft-outlook&logoColor=white" alt="Hire Me" /></a>
-    <a href="https://t.me/resaldo"><img src="https://img.shields.io/badge/Telegram-Chat-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram" /></a>
+    <a href="https://t.me/gosaldo"><img src="https://img.shields.io/badge/Telegram-Chat-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram" /></a>
     <a href="https://linkedin.com"><img src="https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn" /></a>
   </p>
 
@@ -72,12 +72,12 @@
 ### 📊 GitHub Activity & Statistics
 
 <p align="center">
-  <img height="185" src="https://github-readme-stats-eight-xi.vercel.app/api?username=resaldo&show_icons=true&theme=tokyonight&hide_border=true&count_private=true" alt="GitHub Stats" />
-  <img height="185" src="https://github-readme-stats-eight-xi.vercel.app/api/top-langs/?username=resaldo&layout=compact&theme=tokyonight&hide_border=true" alt="Top Languages" />
+  <img height="185" src="https://github-readme-stats-eight-xi.vercel.app/api?username=gosaldo&show_icons=true&theme=tokyonight&hide_border=true&count_private=true" alt="GitHub Stats" />
+  <img height="185" src="https://github-readme-stats-eight-xi.vercel.app/api/top-langs/?username=gosaldo&layout=compact&theme=tokyonight&hide_border=true" alt="Top Languages" />
 </p>
 
 <p align="center">
-  <img src="https://streak-stats.demolab.com/?user=resaldo&theme=tokyonight&hide_border=true" alt="GitHub Streak" />
+  <img src="https://streak-stats.demolab.com/?user=gosaldo&theme=tokyonight&hide_border=true" alt="GitHub Streak" />
 </p>
 
 ---
@@ -92,5 +92,5 @@
 ### 🤝 Let's Collaborate or Hire Me
 I am open to freelance contracts, bespoke EA development, and SaaS partnerships.
 * **Email**: [ringinbambu@gmail.com](mailto:ringinbambu@gmail.com)
-* **Telegram**: [@resaldo](https://t.me/resaldo)
+* **Telegram**: [@gosaldo](https://t.me/gosaldo)
 * **Upwork / MQL5 Freelance**: Available upon request

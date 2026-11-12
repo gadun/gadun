@@ -8,8 +8,8 @@
   </p>
 
   <p align="center">
-    <a href="mailto:your-email@example.com"><img src="https://img.shields.io/badge/Contact-Hire_Me-0078D4?style=for-the-badge&logo=microsoft-outlook&logoColor=white" alt="Hire Me" /></a>
-    <a href="https://t.me/your_telegram"><img src="https://img.shields.io/badge/Telegram-Chat-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram" /></a>
+    <a href="mailto:ringinbambu@gmail.com"><img src="https://img.shields.io/badge/Contact-Hire_Me-0078D4?style=for-the-badge&logo=microsoft-outlook&logoColor=white" alt="Hire Me" /></a>
+    <a href="https://t.me/dotmie"><img src="https://img.shields.io/badge/Telegram-Chat-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram" /></a>
     <a href="https://linkedin.com"><img src="https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn" /></a>
   </p>
 
@@ -93,6 +93,6 @@
 
 ### 🤝 Let's Collaborate or Hire Me
 I am open to freelance contracts, bespoke EA development, and SaaS partnerships.
-* **Email**: [your-email@example.com](mailto:your-email@example.com)
-* **Telegram**: [@your_username](https://t.me/)
+* **Email**: [ringinbambu@gmail.com](mailto:ringinbambu@gmail.com)
+* **Telegram**: [@dotmie](https://t.me/)
 * **Upwork / MQL5 Freelance**: Available upon request

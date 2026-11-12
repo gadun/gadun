@@ -9,7 +9,7 @@
 
   <p align="center">
     <a href="mailto:ringinbambu@gmail.com"><img src="https://img.shields.io/badge/Contact-Hire_Me-0078D4?style=for-the-badge&logo=microsoft-outlook&logoColor=white" alt="Hire Me" /></a>
-    <a href="https://t.me/dotmie"><img src="https://img.shields.io/badge/Telegram-Chat-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram" /></a>
+    <a href="https://t.me/resaldo"><img src="https://img.shields.io/badge/Telegram-Chat-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram" /></a>
     <a href="https://linkedin.com"><img src="https://img.shields.io/badge/LinkedIn-Connect-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white" alt="LinkedIn" /></a>
   </p>
 

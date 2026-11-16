@@ -1,340 +1,180 @@
-# ICT + SMC + CRT All-in-One Indicator (MT5)
+# ICT_SMC_CRT.mq5
 
-Indikator custom MetaTrader 5 yang menggabungkan konsep **ICT (Inner Circle Trader)**, **SMC (Smart Money Concepts)**, dan **CRT (Candle Range Theory)** dalam satu file: `ICT_SMC_CRT.mq5`.
+Panduan simbol, label, warna, dan cara membaca indikator **ICT + SMC + CRT all-in-one** (versi 1.01) di chart MetaTrader 5.
 
-> **Disclaimer:** indikator ini hanya mengotomatiskan aturan visual. Ia tidak menjamin profit. Penandaan zona dalam ICT/SMC bersifat subjektif, jadi hasilnya bergantung pada parameter. Uji di data historis dan akun demo sebelum dipakai di akun real.
+> **Penting:** indikator ini alat bantu analisis, bukan jaminan profit. Uji dulu di akun demo dan selalu gunakan manajemen risiko.
 
----
+## 1. Instalasi singkat
 
-## Daftar Isi
+1. Salin `ICT_SMC_CRT.mq5` ke folder `MQL5/Indicators` (MT5: File > Open Data Folder).
+2. Buka MetaEditor, kompilasi file (F7).
+3. Seret indikator dari jendela Navigator ke chart.
+4. Atur `InpGmtOffset` sesuai selisih jam server broker terhadap GMT (misalnya 2 atau 3). Ini penting agar kotak sesi/killzone tepat.
 
-1. [Instalasi](#1-instalasi)
-2. [Fitur](#2-fitur)
-3. [Cara Membaca Chart](#3-cara-membaca-chart)
-4. [Logika Sinyal](#4-logika-sinyal)
-5. [Parameter](#5-parameter)
-6. [Buffer untuk EA](#6-buffer-untuk-ea)
-7. [Rekomendasi Pengaturan Awal](#7-rekomendasi-pengaturan-awal)
-8. [Anti-Repaint dan Batasan](#8-anti-repaint-dan-batasan)
-9. [Pemecahan Masalah](#9-pemecahan-masalah)
+Indikator hanya menganalisis candle yang **sudah close**. Analisis dihitung ulang setiap ada candle baru, sedangkan susunan label dirapikan ulang otomatis saat Anda zoom atau mengubah ukuran jendela.
 
----
+## 2. Cara membaca label: arah dan warna
 
-## 1. Instalasi
+- Awalan **Bull** = zona/struktur bullish (arah naik, area permintaan/demand).
+- Awalan **Bear** = zona/struktur bearish (arah turun, area penawaran/supply).
+- Awalan **i** (iBOS, iCHoCH) = struktur **internal** (kecil). Tanpa awalan = struktur **swing** (besar).
+- Awalan timeframe seperti **H4 Bull OB** = zona berasal dari timeframe lebih tinggi (HTF), bukan dari timeframe chart.
+- Garis **solid** = zona aktif di timeframe chart. Garis **titik-titik** = zona yang sudah termitigasi atau zona dari HTF.
+- Zona aktif di timeframe chart diisi warna (jika `InpFillZones` aktif).
+- Teks bisa sedikit bergeser ke atas atau bawah dari level harganya agar tidak bertumpuk dengan teks lain (lihat bagian 9). Gunakan garis/kotak sebagai patokan harga yang tepat, bukan posisi teks.
 
-1. Di MT5, buka **File > Open Data Folder**.
-2. Salin `ICT_SMC_CRT.mq5` ke folder `MQL5/Indicators`.
-3. Buka file di **MetaEditor** lalu tekan **F7** (Compile).
-4. Di MT5, pasang indikator lewat **Insert > Indicators > Custom > ICT_SMC_CRT**, atau seret dari panel Navigator.
+## 3. Struktur pasar (SMC)
 
-**Persiapan data:** indikator memakai data H4 (HTF dan CRT), D1, dan W1 (level PDH/PDL/PWH/PWL). Buka sekali chart H4, D1, dan W1 pada simbol yang sama supaya riwayatnya terunduh. Jika tidak, zona HTF atau level harian/mingguan bisa belum muncul.
-
----
-
-## 2. Fitur
-
-### SMC (Smart Money Concepts)
-
-| Fitur | Keterangan |
-|---|---|
-| Struktur Swing | BOS dan CHoCH berdasarkan swing besar (`InpSwingLen`) |
-| Struktur Internal | BOS dan CHoCH kecil (`InpIntLen`), diberi awalan `i` (iBOS, iCHoCH) |
-| EQH / EQL | Equal highs/lows dari micro-pivot dalam toleransi ATR |
-| Liquidity Sweep | Wick menembus level swing lalu close kembali di dalam, ditandai `x BSL` atau `x SSL` |
-| Inducement (IDM) | Micro-swing yang tersapu setelah struktur berubah |
-| Strong / Weak High-Low | Label pada swing terakhir sesuai arah tren swing |
-| Order Block (OB) | Candle berlawanan terdekat pada leg impuls yang menghasilkan BOS/CHoCH |
-| Breaker Block | OB yang gagal (close menembus sisi seberang), arahnya dibalik |
-| Mitigation Block | Dibuat saat CHoCH terjadi setelah swing gagal membuat ekstrem baru |
-| FVG | Celah tiga candle, lengkap dengan garis tengah (Consequent Encroachment) |
-
-### ICT
-
-| Fitur | Keterangan |
-|---|---|
-| Premium / Discount | Dua area dari range swing terakhir, dengan garis Equilibrium 50% |
-| OTE | Zona Optimal Trade Entry 62%-79% |
-| Liquidity Level | PDH, PDL (hari sebelumnya) dan PWH, PWL (minggu sebelumnya) |
-| Killzone | Kotak high-low sesi Asia, London, NY AM, London Close |
-| Silver Bullet | Tiga jendela 1 jam (opsional) |
-| IFVG | FVG yang ditutup menembus sisi seberang, arahnya dibalik |
-| Volume Imbalance | Celah antar-body candle searah dengan wick yang tetap tumpang tindih |
-| Liquidity Void | Candle dengan body besar (sekian kali ATR), area body dianggap void |
-
-### CRT (Candle Range Theory)
-
-- Candle acuan **C1** pada timeframe `InpCrtTF` (bawaan H4).
-- **C2** menyapu satu sisi C1 lalu **close kembali di dalam range** C1.
-- Bias mengikuti arah sapuan: sapu low menghasilkan bullish, sapu high menghasilkan bearish.
-- CRT berhenti berlaku jika: melewati `InpCrtValid` candle HTF, harga close melewati ekstrem sapuan C2, atau target sisi seberang C1 tercapai.
-
-### Multi-Timeframe
-
-- OB, FVG, dan Breaker dari timeframe `InpHtf` (bawaan H4) digambar di chart kecil, berbingkai putus-putus dan berawalan nama timeframe (misalnya `H4 Bull OB`).
-- Tren struktur swing HTF ikut menjadi sumber bias.
-
-### Sinyal dan Alat Bantu
-
-- Panah **BUY** (hijau) dan **SELL** (merah).
-- Garis **SL** (merah putus-putus) dan **TP** (hijau putus-putus) beserta harganya.
-- **Panel info** di pojok kiri atas: bias, status CRT, tren struktur, sesi aktif, dan sinyal terakhir.
-- **Alert** popup, push notification, dan email.
-
----
-
-## 3. Cara Membaca Chart
-
-| Tampilan | Arti |
-|---|---|
-| Garis solid hijau/merah berlabel `BOS` / `CHoCH` | Struktur swing (bullish hijau, bearish merah) |
-| Garis titik-titik berlabel `iBOS` / `iCHoCH` | Struktur internal |
-| Garis oranye `EQH` / `EQL` | Equal highs/lows (kumpulan likuiditas) |
-| Garis magenta putus-putus `IDM` | Inducement tersapu |
-| Teks `x BSL` / `x SSL` | Sweep likuiditas sisi atas (buy-side) / sisi bawah (sell-side) |
-| Kotak berisi `Bull OB` / `Bear OB` | Order Block |
-| Kotak berisi `Bull FVG` / `Bear FVG` + garis tengah | Fair Value Gap |
-| Kotak `Breaker`, `MB`, `IFVG`, `VI`, `Void` | Breaker, Mitigation Block, IFVG, Volume Imbalance, Liquidity Void |
-| Kotak merah titik-titik `Premium`, hijau `Discount`, garis abu `EQ 50%` | Area PD dari swing terakhir |
-| Kotak emas `OTE` | Zona 62%-79% |
-| Kotak emas `CRT Bull H4` / `CRT Bear H4` + garis titik tengah | Range candle acuan CRT; garis oranye tebal = ekstrem sapuan C2 |
-| Garis `PDH` `PDL` `PWH` `PWL` | Level likuiditas harian dan mingguan |
-| Kotak berwarna berlabel `Asia`, `London`, `NY AM`, ... | Rentang high-low selama sesi/killzone |
-
-Zona yang sudah termitigasi disembunyikan, kecuali `InpShowMitigated` diaktifkan.
-
----
-
-## 4. Logika Sinyal
-
-Sinyal **BUY** muncul bila semua syarat berikut terpenuhi (SELL adalah kebalikannya):
-
-1. **Bias bullish** dari CRT dan/atau struktur HTF, sesuai `InpBiasMode`.
-2. **Liquidity sweep sisi bawah** terjadi dalam `InpSetupBars` bar terakhir. Sapuan bisa berasal dari swing, swing internal, atau CRT.
-3. **BOS/CHoCH bullish** terjadi setelah sapuan tersebut (juga dalam `InpSetupBars`).
-4. *(Opsional)* **IDM tersapu** (`InpReqIDM`).
-5. Zona entri yang dibuat setelah sapuan (OB, FVG, Mitigation Block, atau Breaker bullish) **"dipersenjatai"**, lalu harga **kembali menyentuh zona** dan close tidak menembus sisi bawah zona.
-6. *(Opsional)* Titik tengah zona berada di **discount** (`InpReqPD`).
-7. *(Opsional)* Candle berada di dalam **killzone** aktif (`InpReqKZ`).
-8. **RR minimal** terpenuhi (`InpMinRR`).
-
-**Stop Loss:** di bawah zona entri atau di bawah ekstrem sapuan (yang lebih jauh), ditambah buffer `InpSlBufATR` x ATR.
-
-**Take Profit** (`InpTpMode`):
-
-- `TP_LIQUIDITY`: level likuiditas terdekat di sisi berlawanan yang memenuhi RR minimum, dari kandidat high swing internal, high swing besar, sisi atas CRT, PDH, dan PWH. Jika tidak ada, dipakai kelipatan `InpRR`.
-- `TP_CRT50`: 50% range CRT, atau sisi seberang CRT bila 50% terlalu dekat. Jika CRT tidak aktif, kembali ke logika likuiditas.
-- `TP_RR`: kelipatan `InpRR` dari jarak SL.
-
-Setiap zona hanya menghasilkan satu sinyal, dan zona kedaluwarsa setelah `InpArmExpire` bar.
-
----
-
-## 5. Parameter
-
-### Umum
-
-| Parameter | Bawaan | Fungsi |
+| Label | Warna | Artinya |
 |---|---|---|
-| `InpMaxBars` | 1500 | Jumlah bar yang dianalisis (lebih besar = lebih lambat) |
-| `InpAtrPeriod` | 14 | Periode ATR |
-| `InpExtendBars` | 15 | Perpanjangan objek ke kanan (bar) |
-| `InpShowPanel` | true | Panel info |
-| `InpMaxSigDraw` | 5 | Jumlah sinyal terakhir yang digambar SL/TP-nya |
-
-### Struktur Pasar (SMC)
-
-| Parameter | Bawaan | Fungsi |
-|---|---|---|
-| `InpShowSwing` / `InpSwingLen` | true / 10 | Tampilkan struktur swing / panjang swing |
-| `InpShowInternal` / `InpIntLen` | true / 3 | Tampilkan struktur internal / panjang swing internal |
-| `InpMicroLen` | 2 | Panjang micro-pivot untuk EQH/EQL dan IDM |
-| `InpShowEQ` / `InpEqTolATR` | true / 0.10 | Tampilkan EQH/EQL / toleransi (x ATR) |
-| `InpShowSweep` | true | Tampilkan sweep |
-| `InpShowIDM` | true | Tampilkan inducement |
-| `InpShowStrongWeak` | true | Label Strong/Weak High-Low |
-| `InpMaxEvents` | 15 | Maks BOS/CHoCH yang digambar per jenis |
-| `InpColStrBull` / `InpColStrBear` | LimeGreen / Red | Warna struktur |
-
-### Zona
-
-| Parameter | Bawaan | Fungsi |
-|---|---|---|
-| `InpShowOB`, `InpShowFVG`, `InpShowBreaker`, `InpShowMitig`, `InpShowIFVG`, `InpShowVI`, `InpShowVoid` | true | Aktif/nonaktif tiap jenis zona |
-| `InpFvgMinATR` | 0.10 | Ukuran minimum FVG (x ATR) |
-| `InpVoidATR` | 2.0 | Body minimum Liquidity Void (x ATR) |
-| `InpShowMitigated` | false | Tampilkan juga zona yang sudah termitigasi |
-| `InpFillZones` | true | Isi warna zona |
-| `InpMaxZones` | 6 | Maks zona aktif digambar per jenis |
-| `InpColBullOB`, `InpColBearOB`, `InpColBullFVG`, `InpColBearFVG`, `InpColBreaker`, `InpColMitig` | lihat kode | Warna zona |
-
-### Multi-Timeframe
-
-| Parameter | Bawaan | Fungsi |
-|---|---|---|
-| `InpShowHtfZones` | true | Tampilkan zona HTF |
-| `InpHtf` | H4 | Timeframe HTF untuk bias struktur dan zona |
-| `InpHtfSwingLen` | 5 | Panjang swing HTF |
-| `InpHtfMaxZones` | 3 | Maks zona HTF per jenis |
-
-### CRT
-
-| Parameter | Bawaan | Fungsi |
-|---|---|---|
-| `InpShowCRT` | true | Tampilkan kotak CRT |
-| `InpCrtTF` | H4 | Timeframe candle acuan |
-| `InpCrtValid` | 3 | CRT berlaku berapa candle HTF setelah C2 close |
-| `InpCrtBoxes` | 3 | Jumlah kotak CRT terakhir yang digambar |
-
-### ICT: PD Array, OTE, Likuiditas
-
-| Parameter | Bawaan | Fungsi |
-|---|---|---|
-| `InpShowPD` | true | Premium / Discount / EQ |
-| `InpShowOTE` | true | Zona OTE |
-| `InpShowLiq` | true | PDH/PDL dan PWH/PWL |
-
-### ICT: Killzone dan Silver Bullet (jam GMT)
-
-| Parameter | Bawaan | Fungsi |
-|---|---|---|
-| `InpShowKZ` | true | Gambar kotak sesi |
-| `InpKzDays` | 3 | Berapa hari ke belakang yang digambar |
-| `InpGmtOffset` | 0 | **Selisih jam server broker terhadap GMT** (contoh: 2 atau 3). Wajib disesuaikan |
-| `InpKzAsia`, `InpAsiaS`, `InpAsiaE` | true, 1, 5 | Asia |
-| `InpKzLondon`, `InpLondonS`, `InpLondonE` | true, 7, 10 | London |
-| `InpKzNYAM`, `InpNYAMS`, `InpNYAME` | true, 12, 15 | New York AM |
-| `InpKzLC`, `InpLCS`, `InpLCE` | false, 15, 17 | London Close |
-| `InpKzSB`, `InpSB1`, `InpSB2`, `InpSB3` | false, 8, 15, 19 | Silver Bullet (jam mulai tiap jendela, durasi 1 jam) |
+| **BOS** | Hijau (bullish) / Merah (bearish) | *Break of Structure* swing: candle **close** menembus swing high/low besar searah tren yang sedang berjalan. Konfirmasi tren berlanjut. Garis solid. |
+| **CHoCH** | Hijau / Merah | *Change of Character* swing: close menembus swing berlawanan dengan tren sebelumnya. Tanda awal perubahan tren. Garis solid. |
+| **iBOS** | Hijau / Merah | BOS pada struktur internal (swing kecil, panjang `InpIntLen`). Garis titik-titik, font lebih kecil. |
+| **iCHoCH** | Hijau / Merah | CHoCH pada struktur internal. Sering muncul lebih dulu daripada CHoCH swing sehingga dipakai sebagai sinyal dini. |
+| **EQH** | Oranye | *Equal Highs*: dua puncak mikro yang hampir sama tinggi (selisih maksimal `InpEqTolATR` x ATR). Menandakan likuiditas buy-side menumpuk di atasnya. |
+| **EQL** | Oranye | *Equal Lows*: dua lembah mikro hampir sama rendah. Likuiditas sell-side menumpuk di bawahnya. |
+| **IDM** | Magenta (garis putus-putus) | *Inducement*: low mikro (saat struktur internal bullish) atau high mikro (saat bearish) yang berhasil diambil harga. Sering dianggap jebakan sebelum pergerakan sebenarnya. |
+| **x BSL** | Oranye tua | *Buy-Side Liquidity* tersapu: harga menembus swing high lalu close kembali di bawahnya. Condong ke bias **bearish**. Muncul di ujung high. |
+| **x SSL** | Oranye tua | *Sell-Side Liquidity* tersapu: harga menembus swing low lalu close kembali di atasnya. Condong ke bias **bullish**. Muncul di ujung low. |
+| **Strong High / Weak High** | Perak | Label pada swing high terakhir. Dalam tren bullish high disebut *Weak High* (target likuiditas), dalam tren bearish disebut *Strong High* (penahan tren). |
+| **Strong Low / Weak Low** | Perak | Label pada swing low terakhir. Tren bullish: *Strong Low*. Tren bearish: *Weak Low*. |
 
 Catatan:
 
-- Jam bawaan mengacu waktu New York musim dingin (EST). Saat DST Amerika Serikat, geser sekitar 1 jam lebih awal.
-- Cara mencari `InpGmtOffset`: bandingkan jam server di Market Watch dengan jam GMT. Selisihnya adalah nilai yang diisi.
-- Kotak killzone hanya bermakna di timeframe H1 ke bawah.
+- Tren diperbarui hanya saat candle close menembus level, sehingga sumbu (wick) saja tidak menghasilkan BOS/CHoCH.
+- Break pertama setelah indikator dimuat selalu dihitung BOS, karena belum ada tren sebelumnya.
+- Label BOS/CHoCH bullish ditaruh di atas garis, bearish di bawah garis.
 
-### Sinyal
+## 4. Zona (ICT / SMC)
 
-| Parameter | Bawaan | Fungsi |
-|---|---|---|
-| `InpBiasMode` | CRT dulu, lalu HTF | Sumber bias: CRT saja / HTF saja / CRT dulu lalu HTF / keduanya harus searah |
-| `InpReqSweep` | true | Wajib ada liquidity sweep |
-| `InpReqIDM` | false | Wajib ada inducement tersapu |
-| `InpReqPD` | true | Buy hanya di discount, sell hanya di premium |
-| `InpReqKZ` | false | Entri hanya dalam killzone aktif |
-| `InpSetupBars` | 40 | Jendela waktu sweep ke BOS/CHoCH (bar) |
-| `InpArmExpire` | 100 | Zona kedaluwarsa setelah n bar |
-| `InpEntryOB`, `InpEntryFVG`, `InpEntryMitig`, `InpEntryBreaker` | true | Jenis zona yang boleh dipakai entri |
-| `InpSlBufATR` | 0.20 | Buffer SL (x ATR) |
-| `InpTpMode` | Likuiditas | Mode TP |
-| `InpRR` | 2.0 | RR cadangan / mode RR |
-| `InpMinRR` | 1.0 | RR minimum agar sinyal valid |
+| Label | Artinya | Cara terbentuk | Perubahan status |
+|---|---|---|---|
+| **Bull OB** | *Order Block* bullish: area permintaan. | Saat terjadi break bullish, diambil candle terendah pada leg impuls, lalu dicari candle bearish terdekat (maksimal 3 candle ke belakang). | Jika candle close di bawah dasar zona, berubah menjadi **Bear Breaker**. |
+| **Bear OB** | *Order Block* bearish: area penawaran. | Kebalikan dari Bull OB (candle bullish terdekat pada leg turun). | Jika close di atas puncak zona, berubah menjadi **Bull Breaker**. |
+| **Bull Breaker** | *Breaker Block* bullish: bekas Bear OB yang gagal bertahan lalu menjadi support. | Bear OB ditembus close ke atas. | Jika close di bawah dasar zona, zona dianggap termitigasi (selesai). |
+| **Bear Breaker** | *Breaker Block* bearish: bekas Bull OB yang gagal lalu menjadi resistance. | Bull OB ditembus close ke bawah. | Jika close di atas puncak zona, zona termitigasi. |
+| **Bull FVG / Bear FVG** | *Fair Value Gap*: celah harga tiga candle yang belum terisi. Bull = celah naik, Bear = celah turun. | Low candle ke-3 di atas high candle ke-1 (bull), atau sebaliknya (bear). Ukuran minimal `InpFvgMinATR` x ATR. Garis tengah titik-titik = *Consequent Encroachment* (50% FVG). | Sumbu (wick) yang menyentuh sisi jauh zona = termitigasi. Close menembus zona = berubah menjadi **IFVG**. |
+| **Bull IFVG / Bear IFVG** | *Inversion FVG*: FVG yang ditembus close lalu berbalik fungsi. **Bear IFVG** adalah bekas Bull FVG yang ditembus ke bawah (kini jadi resistance); **Bull IFVG** adalah bekas Bear FVG yang ditembus ke atas (kini jadi support). | FVG ditembus close (hanya jika `InpShowIFVG` aktif). | Close menembus lagi ke arah berlawanan = termitigasi. |
+| **Bull MB / Bear MB** | *Mitigation Block*: zona dari candle sekitar swing sebelumnya yang muncul saat CHoCH, ketika swing gagal membuat ekstrem baru. | Pada CHoCH dengan low/high yang tidak membuat ekstrem baru, diambil candle searah dekat swing sebelumnya. | Close menembus sisi jauh zona = termitigasi. |
+| **Bull VI / Bear VI** | *Volume Imbalance*: celah antara open candle sekarang dan close candle sebelumnya (badan tidak bersambung), tetapi sumbu masih saling tumpang tindih. | Dua candle searah dengan celah badan minimal 0.02 x ATR. | Sumbu menyentuh sisi jauh zona = termitigasi. |
+| **Bull Void / Bear Void** | *Liquidity Void*: candle impuls dengan badan besar (minimal `InpVoidATR` x ATR). Garis tengah titik-titik menunjukkan titik 50%. | Badan candle melebihi ambang. | Harga mengisi sampai titik tengah = termitigasi. |
 
-### Alert
+Semua zona memakai warna dari input (OB, FVG, Breaker, MB) atau warna tetap (IFVG ungu, VI abu-abu, Void abu-abu gelap). Zona yang sudah termitigasi hanya digambar jika `InpShowMitigated` aktif.
 
-| Parameter | Bawaan | Fungsi |
-|---|---|---|
-| `InpAlertPopup` | true | Alert popup |
-| `InpAlertPush` | false | Push notification (perlu setup MetaQuotes ID) |
-| `InpAlertMail` | false | Email (perlu setup email di MT5) |
+## 5. ICT: PD Array, OTE, dan likuiditas
 
-Alert dikirim satu kali saat candle baru dibuka, untuk sinyal pada candle yang baru saja close.
-
----
-
-## 6. Buffer untuk EA
-
-| Indeks | Isi |
+| Label | Artinya |
 |---|---|
-| 0 | Sinyal BUY (harga posisi panah; `EMPTY_VALUE` = tidak ada) |
-| 1 | Sinyal SELL (harga posisi panah; `EMPTY_VALUE` = tidak ada) |
-| 2 | SL untuk BUY |
-| 3 | TP untuk BUY |
-| 4 | SL untuk SELL |
-| 5 | TP untuk SELL |
-| 6 | Bias: `1` bullish, `-1` bearish, `0` netral |
+| **Premium** | Setengah atas range swing terakhir (merah tua). Area mahal: lebih baik untuk mencari **SELL**. |
+| **EQ 50%** | Garis *Equilibrium*, titik tengah range swing (abu-abu putus-putus). |
+| **Discount** | Setengah bawah range swing (hijau laut). Area murah: lebih baik untuk mencari **BUY**. |
+| **OTE** | *Optimal Trade Entry*: kotak emas di level retracement 62% sampai 79% dari range swing. Pada tren bullish diukur dari atas ke bawah, pada tren bearish dari bawah ke atas. |
+| **PDH / PDL** | *Previous Day High / Low*: high dan low hari sebelumnya (garis perak titik-garis). Target likuiditas harian. |
+| **PWH / PWL** | *Previous Week High / Low*: high dan low minggu sebelumnya (garis emas titik-garis). Target likuiditas mingguan. |
 
-Contoh membaca sinyal dari EA (memakai input bawaan):
+## 6. CRT (Candle Range Theory)
 
-```mql5
-int h = iCustom(_Symbol, _Period, "ICT_SMC_CRT");
-
-double buy[], sell[], sl[], tp[];
-ArraySetAsSeries(buy,  true);
-ArraySetAsSeries(sell, true);
-ArraySetAsSeries(sl,   true);
-ArraySetAsSeries(tp,   true);
-
-// shift 1 = candle terakhir yang sudah close
-CopyBuffer(h, 0, 1, 1, buy);
-CopyBuffer(h, 1, 1, 1, sell);
-
-if(buy[0] != EMPTY_VALUE)
-  {
-   CopyBuffer(h, 2, 1, 1, sl);
-   CopyBuffer(h, 3, 1, 1, tp);
-   // buka posisi BUY dengan sl[0] dan tp[0]
-  }
-if(sell[0] != EMPTY_VALUE)
-  {
-   CopyBuffer(h, 4, 1, 1, sl);
-   CopyBuffer(h, 5, 1, 1, tp);
-   // buka posisi SELL dengan sl[0] dan tp[0]
-  }
-```
-
-Catatan:
-
-- Buat handle `iCustom` sekali di `OnInit`, bukan di setiap tick.
-- Jika ingin mengubah input lewat `iCustom`, semua parameter harus diisi berurutan sesuai daftar input di indikator.
-- Nilai buffer 0 dan 1 adalah posisi panah (sedikit di luar candle), bukan harga entri. Gunakan harga market atau close candle sebagai entri.
-- Selalu uji di Strategy Tester sebelum dipakai.
-
----
-
-## 7. Rekomendasi Pengaturan Awal
-
-**Scalping XAUUSD (M5-M15)**
-
-- `InpHtf` = H1 atau H4, `InpCrtTF` = H1 atau H4.
-- `InpGmtOffset` sesuai broker, `InpReqKZ` = true (London dan NY AM).
-- `InpMinRR` = 1.5.
-
-**Intraday (M15-H1)**
-
-- Pakai pengaturan bawaan, lalu naikkan `InpSwingLen` ke 12-15 jika struktur terlalu ramai.
-
-**Sinyal lebih selektif**
-
-- `InpBiasMode` = CRT dan HTF searah, `InpReqIDM` = true, `InpMinRR` = 2.
-
-**Chart terlalu penuh**
-
-- Kecilkan `InpMaxZones` dan `InpMaxEvents`.
-- Matikan `InpShowVI`, `InpShowVoid`, `InpShowIFVG`, dan `InpShowMitig`.
-- Nonaktifkan `InpShowInternal`.
-
----
-
-## 8. Anti-Repaint dan Batasan
-
-- Perhitungan dilakukan ulang setiap **candle baru dibuka**, dari `InpMaxBars` bar terakhir. Sinyal dan zona pada candle yang sudah close tidak berubah antar-tick.
-- Swing baru terkonfirmasi setelah N candle ditutup (N = panjang swing). Artinya struktur selalu terdeteksi dengan jeda, bukan di titik ekstremnya.
-- Bias HTF dan CRT hanya memakai candle HTF yang **sudah close**.
-- Perubahan parameter atau penggantian timeframe memicu perhitungan ulang penuh.
-- Beberapa definisi disederhanakan agar dapat dikodekan secara objektif: Mitigation Block, Liquidity Void, dan Volume Imbalance. Hasilnya bisa berbeda dari tafsiran trader lain.
-- Volume Imbalance jarang muncul pada instrumen dengan harga yang hampir kontinu (misalnya emas dan forex).
-- Terlalu banyak syarat aktif membuat sinyal jarang. Terlalu sedikit syarat membuat sinyal palsu bertambah.
-
----
-
-## 9. Pemecahan Masalah
-
-| Masalah | Penyebab dan solusi |
+| Simbol | Artinya |
 |---|---|
-| Tidak ada sinyal | Syarat terlalu ketat. Coba matikan `InpReqPD`, turunkan `InpMinRR`, atau ubah `InpBiasMode` menjadi CRT dulu lalu HTF |
-| Zona HTF atau PDH/PWH tidak muncul | Riwayat H4/D1/W1 belum terunduh. Buka chart timeframe tersebut sekali |
-| Kotak killzone meleset jamnya | Atur `InpGmtOffset` sesuai broker, dan sesuaikan jam saat DST |
-| Panel atau objek tidak muncul | Pastikan `InpShowPanel` aktif dan chart memiliki cukup bar (minimal 100) |
-| Chart lambat | Turunkan `InpMaxBars` (misalnya 800) dan batasi jumlah zona yang digambar |
-| Ingin menghapus semua objek | Lepas indikator dari chart; semua objek berawalan `ICS_` ikut dihapus |
-| EA tidak membaca buffer | Pastikan nama file pada `iCustom` benar (`ICT_SMC_CRT`) dan baca candle dengan shift 1 |
+| **Kotak emas gelap (goldenrod)** | Range candle acuan **C1** pada timeframe `InpCrtTF` (default H4), diperpanjang sampai C2 selesai (close). |
+| **Garis titik-titik di tengah kotak** | Level 50% dari range C1. Bisa dipakai sebagai target (mode TP `TP_CRT50`). |
+| **Garis oranye tebal pendek** | Ujung sapuan (*sweep*) oleh candle **C2**. Dipakai juga sebagai batas SL. |
+| **CRT Bull H4** | C2 menyapu di bawah low C1, lalu close kembali ke dalam range C1. Bias **bullish**, target ke atas menuju range C1. |
+| **CRT Bear H4** | C2 menyapu di atas high C1, lalu close kembali ke dalam range C1. Bias **bearish**, target ke bawah. |
+
+CRT dianggap berlaku selama `InpCrtValid` candle HTF setelah C2 close. CRT dinyatakan gugur (*dead*) bila harga close melewati ujung sapuan, atau harga mencapai sisi berlawanan dari range C1.
+
+## 7. Killzone dan sesi (jam GMT)
+
+Kotak titik-titik menandai high-low harga selama sesi. Nama sesi tertulis di pojok kiri atas kotak. Hanya `InpKzDays` hari terakhir yang digambar.
+
+| Label | Warna | Jam default (GMT) |
+|---|---|---|
+| **Asia** | Ungu | 01 - 05 |
+| **London** | Biru | 07 - 10 |
+| **NY AM** | Merah tomat | 12 - 15 |
+| **London Close** | Cokelat | 15 - 17 (nonaktif default) |
+| **SB 1 / SB 2 / SB 3** | Hijau kebiruan | *Silver Bullet*, jendela 1 jam mulai jam 08, 15, 19 (nonaktif default) |
+
+Jika `InpReqKZ` aktif, sinyal hanya dikeluarkan saat harga berada di dalam salah satu sesi yang diaktifkan.
+
+## 8. Sinyal, SL, TP, dan panel
+
+### Simbol sinyal
+
+| Simbol | Artinya |
+|---|---|
+| **Panah hijau ke atas** (di bawah candle) | Sinyal **BUY**. |
+| **Panah merah ke bawah** (di atas candle) | Sinyal **SELL**. |
+| **Garis merah putus-putus + teks `SL harga`** | Stop loss sinyal. |
+| **Garis hijau putus-putus + teks `TP harga`** | Take profit sinyal. |
+
+Hanya `InpMaxSigDraw` sinyal terakhir yang digambar SL/TP-nya.
+
+### Logika sinyal (ringkas)
+
+1. **Bias** ditentukan oleh `InpBiasMode`: CRT saja, struktur HTF saja, CRT lalu HTF, atau keduanya harus searah.
+2. Bila `InpReqSweep` aktif, harus ada *liquidity sweep* (atau sapuan CRT) dalam `InpSetupBars` candle terakhir. Bila `InpReqIDM` aktif, harus ada inducement tersapu.
+3. Harus ada BOS/CHoCH searah bias setelah sapuan tersebut.
+4. Zona yang terbentuk setelahnya (OB, FVG, MB, Breaker, sesuai input `InpEntry...`) menjadi **siap (armed)**, berlaku sampai `InpArmExpire` candle.
+5. Sinyal keluar saat candle menyentuh zona siap dan close di dalam/di atas zona yang sesuai. Jika `InpReqPD` aktif, buy hanya di discount dan sell hanya di premium.
+6. **SL** di sisi jauh zona atau ujung sapuan, ditambah buffer `InpSlBufATR` x ATR.
+7. **TP** mengikuti `InpTpMode` (likuiditas terdekat, 50% CRT, atau kelipatan RR). Sinyal dibuang jika RR di bawah `InpMinRR`.
+
+### Panel info (pojok kiri atas)
+
+| Baris | Isi |
+|---|---|
+| **ICT \| SMC \| CRT** | Judul panel. |
+| **Bias** | BULLISH / BEARISH / NETRAL, beserta sumber bias: (CRT), (HTF), atau (CRT+HTF). |
+| **CRT (timeframe)** | Bullish aktif / Bearish aktif / tanda minus bila tidak ada CRT berlaku. |
+| **Struktur** | Tren swing dan tren internal saat ini (Bull / Bear / minus). |
+| **Sesi** | Sesi yang sedang berjalan pada candle terakhir. |
+| **Sinyal** | Sinyal terakhir (BUY/SELL beserta waktunya). |
+
+## 9. Anti-tumpuk label (baru di v1.01)
+
+Saat banyak sinyal ICT, SMC, dan CRT muncul bersamaan, teks sering menumpuk di titik yang sama, terutama di sisi kanan (Premium, EQ, OTE, PDH, SL, TP). Versi ini menghitung kotak piksel tiap teks dan menggeser teks yang bertabrakan ke atas atau bawah.
+
+- Urutan prioritas (yang pertama tidak bergeser): SL/TP, CRT, BOS/CHoCH dan label struktur, Premium/EQ/OTE, PDH/PDL/PWH/PWL, zona, lalu sesi.
+- Area panel info dihindari oleh teks lain.
+- Susunan label dihitung ulang otomatis saat zoom, ubah ukuran jendela, atau skala harga berubah.
+- Atur lewat `InpAntiOverlap` (aktif/nonaktif) dan `InpLabelGap` (jarak antar teks dalam piksel).
+- Bila masih terlalu rapat: naikkan `InpLabelGap`, atau kurangi `InpMaxZones`, `InpMaxEvents`, dan `InpMaxSigDraw`.
+
+## 10. Buffer untuk EA (iCustom / CopyBuffer)
+
+| Buffer | Isi |
+|---|---|
+| 0 | Harga posisi panah BUY (`EMPTY_VALUE` jika tidak ada). |
+| 1 | Harga posisi panah SELL (`EMPTY_VALUE` jika tidak ada). |
+| 2 | SL untuk BUY. |
+| 3 | TP untuk BUY. |
+| 4 | SL untuk SELL. |
+| 5 | TP untuk SELL. |
+| 6 | Bias: 1 = bullish, -1 = bearish, 0 = netral. |
+
+Sinyal hanya dihitung pada candle yang sudah close, jadi baca buffer dari bar index 1 (candle terakhir yang sudah selesai) untuk menghindari sinyal yang berubah.
+
+## 11. Alert
+
+- `InpAlertPopup`: popup di MT5.
+- `InpAlertPush`: notifikasi push ke aplikasi MT5 di ponsel (perlu MetaQuotes ID di pengaturan).
+- `InpAlertMail`: email (perlu pengaturan email di MT5).
+
+Isi alert: arah, simbol, timeframe, SL, dan TP.
+
+## 12. Pemecahan masalah
+
+| Masalah | Solusi |
+|---|---|
+| Kotak sesi tidak sesuai jam | Atur `InpGmtOffset` sesuai jam server broker. |
+| Tidak ada sinyal sama sekali | Longgarkan filter: matikan `InpReqKZ`, `InpReqIDM`, atau `InpReqPD`; naikkan `InpSetupBars`; turunkan `InpMinRR`. |
+| Chart terlalu penuh | Matikan jenis zona yang tidak dipakai (VI, Void, IFVG), atau kurangi `InpMaxZones` dan `InpMaxEvents`. |
+| Zona HTF tidak muncul | Pastikan data timeframe `InpHtf` sudah termuat (buka chart H4 sebentar), lalu muat ulang indikator. |
+| Indikator lambat | Turunkan `InpMaxBars` (default 1500). |
+| Teks masih menumpuk | Naikkan `InpLabelGap`, atau perbesar jarak antar label dengan mengurangi jumlah objek yang ditampilkan. |
+
+## 13. Disclaimer
+
+Indikator ini hanya alat bantu analisis teknikal dan bukan nasihat keuangan. Trading forex, emas, dan CFD berisiko tinggi. Hasil masa lalu tidak menjamin hasil di masa depan.

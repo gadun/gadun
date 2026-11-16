@@ -10,9 +10,10 @@
 //|   6 = Bias (1 = bullish, -1 = bearish, 0 = netral)               |
 //|                                                                  |
 //|  Semua sinyal dihitung hanya pada candle yang sudah close.       |
+//|  v1.01: label/teks tidak bertumpuk (anti-overlap).               |
 //+------------------------------------------------------------------+
 #property copyright "ICT + SMC + CRT"
-#property version   "1.00"
+#property version   "1.01"
 #property description "ICT + SMC + CRT all-in-one. Bukan jaminan profit. Uji di demo dulu."
 #property indicator_chart_window
 #property indicator_buffers 7
@@ -54,6 +55,8 @@ input int    InpAtrPeriod      = 14;     // Periode ATR
 input int    InpExtendBars     = 15;     // Perpanjangan objek ke kanan (bar)
 input bool   InpShowPanel      = true;   // Tampilkan panel info
 input int    InpMaxSigDraw     = 5;      // Jumlah sinyal terakhir yang digambar SL/TP-nya
+input bool   InpAntiOverlap    = true;   // Cegah teks/label bertumpuk
+input int    InpLabelGap       = 2;      // Jarak antar label (piksel)
 
 input group "=== STRUKTUR PASAR (SMC) ==="
 input bool   InpShowSwing      = true;   // Tampilkan BOS/CHoCH swing (struktur besar)
@@ -1159,6 +1162,12 @@ datetime g_lastAlert=0;
 bool     g_alertInit=false;
 int      g_oc=0;
 
+//--- status layar (untuk menyusun ulang label saat zoom / ubah ukuran)
+int      g_scale=-1;
+double   g_span=0.0;
+int      g_hpx=0;
+ulong    g_lastRedraw=0;
+
 double BufBuy[];
 double BufSell[];
 double BufBuySL[];
@@ -1166,6 +1175,80 @@ double BufBuyTP[];
 double BufSellSL[];
 double BufSellTP[];
 double BufBias[];
+
+//+------------------------------------------------------------------+
+//| Manajer tabrakan teks (koordinat piksel)                         |
+//+------------------------------------------------------------------+
+struct SBox
+  {
+   int x1;
+   int y1;
+   int x2;
+   int y2;
+  };
+
+SBox g_box[];
+int  g_boxN=0;
+
+void AddBox(int x1,int y1,int x2,int y2)
+  {
+   if(g_boxN>=ArraySize(g_box))
+      ArrayResize(g_box,g_boxN+256);
+   g_box[g_boxN].x1=x1;
+   g_box[g_boxN].y1=y1;
+   g_box[g_boxN].x2=x2;
+   g_box[g_boxN].y2=y2;
+   g_boxN++;
+  }
+
+bool HitBox(int x1,int y1,int x2,int y2)
+  {
+   for(int k=0;k<g_boxN;k++)
+     {
+      if(x1<g_box[k].x2 && x2>g_box[k].x1 && y1<g_box[k].y2 && y2>g_box[k].y1)
+         return true;
+     }
+   return false;
+  }
+
+//--- geser harga teks ke atas/bawah sampai tidak menabrak teks lain
+void AvoidOverlap(datetime t,double &p,string txt,int fs,ENUM_ANCHOR_POINT a)
+  {
+   if(!InpAntiOverlap)
+      return;
+   int x=0;
+   int y=0;
+   if(!ChartTimePriceToXY(0,0,t,p,x,y))
+      return;
+   int w=(int)(StringLen(txt)*fs*0.70)+4;
+   int h=(int)(fs*1.8)+2;
+   bool center=(a==ANCHOR_LOWER || a==ANCHOR_UPPER || a==ANCHOR_CENTER);
+   bool right =(a==ANCHOR_RIGHT || a==ANCHOR_RIGHT_LOWER || a==ANCHOR_RIGHT_UPPER);
+   bool up    =(a==ANCHOR_LOWER || a==ANCHOR_LEFT_LOWER || a==ANCHOR_RIGHT_LOWER);
+   bool mid   =(a==ANCHOR_LEFT || a==ANCHOR_RIGHT || a==ANCHOR_CENTER);
+   int x1=center?(x-w/2):(right?(x-w):x);
+   int x2=x1+w;
+   int step=h+InpLabelGap;
+   int dy=0;
+   int y1=0;
+   for(int n=0;n<25;n++)
+     {
+      int ys=y+dy;
+      y1=up?(ys-h):(mid?(ys-h/2):ys);
+      if(!HitBox(x1,y1,x2,y1+h))
+         break;
+      dy+=up?-step:step;
+     }
+   AddBox(x1,y1,x2,y1+h);
+   if(dy!=0)
+     {
+      int sub=0;
+      datetime tt=0;
+      double pp=0.0;
+      if(ChartXYToTimePrice(0,x,y+dy,sub,tt,pp))
+         p=pp;
+     }
+  }
 
 //+------------------------------------------------------------------+
 //| Fungsi gambar                                                    |
@@ -1204,8 +1287,10 @@ void DLine(datetime t1,double p1,datetime t2,double p2,color c,ENUM_LINE_STYLE s
 
 void DText(datetime t,double p,string txt,color c,int fs,ENUM_ANCHOR_POINT a)
   {
+   double pp=p;
+   AvoidOverlap(t,pp,txt,fs,a);
    string n=NM("T");
-   if(!ObjectCreate(0,n,OBJ_TEXT,0,t,p))
+   if(!ObjectCreate(0,n,OBJ_TEXT,0,t,pp))
       return;
    ObjectSetString(0,n,OBJPROP_TEXT,txt);
    ObjectSetString(0,n,OBJPROP_FONT,"Arial");
@@ -1592,26 +1677,38 @@ void DrawPanel(CSmc &m)
    PanelRow(5,"Sinyal: "+sg,clrYellow);
   }
 
+//--- urutan gambar = prioritas posisi label.
+//--- yang digambar lebih dulu tetap di tempatnya, yang belakangan bergeser.
 void DrawAll()
   {
    ObjectsDeleteAll(0,PFX);
    g_oc=0;
+   g_boxN=0;
    if(g_main.m_n<10)
       return;
-   if(InpShowKZ)
-      DrawKillzones(g_main);
-   if(InpShowLiq)
-      DrawLiq(g_main);
-   DrawRange(g_main);
-   if(InpShowHtfZones && g_htfOk)
-      DrawZones(g_htf,true);
-   DrawZones(g_main,false);
-   DrawLines(g_main);
+
+   //--- area panel info dianggap terisi supaya teks tidak menimpanya
+   if(InpShowPanel)
+      AddBox(8,22,278,22+6*16+14);
+
+   DrawSignals(g_main);
    if(InpShowCRT)
       DrawCrt(g_main);
-   DrawSignals(g_main);
+   DrawLines(g_main);
+   DrawRange(g_main);
+   if(InpShowLiq)
+      DrawLiq(g_main);
+   DrawZones(g_main,false);
+   if(InpShowHtfZones && g_htfOk)
+      DrawZones(g_htf,true);
+   if(InpShowKZ)
+      DrawKillzones(g_main);
    if(InpShowPanel)
       DrawPanel(g_main);
+
+   g_scale=(int)ChartGetInteger(0,CHART_SCALE);
+   g_span=ChartGetDouble(0,CHART_PRICE_MAX)-ChartGetDouble(0,CHART_PRICE_MIN);
+   g_hpx=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS);
    ChartRedraw();
   }
 
@@ -1676,6 +1773,10 @@ int OnInit()
    SetupSessions();
    g_lastBar=0;
    g_alertInit=false;
+   g_scale=-1;
+   g_span=0.0;
+   g_hpx=0;
+   g_lastRedraw=0;
    return INIT_SUCCEEDED;
   }
 
@@ -1683,6 +1784,26 @@ void OnDeinit(const int reason)
   {
    ObjectsDeleteAll(0,PFX);
    ChartRedraw();
+  }
+
+//--- susun ulang label saat zoom / ukuran jendela / skala harga berubah
+void OnChartEvent(const int id,const long &lparam,const double &dparam,const string &sparam)
+  {
+   if(id!=CHARTEVENT_CHART_CHANGE || !InpAntiOverlap)
+      return;
+   if(g_main.m_n<10)
+      return;
+   int sc=(int)ChartGetInteger(0,CHART_SCALE);
+   int hp=(int)ChartGetInteger(0,CHART_HEIGHT_IN_PIXELS);
+   double span=ChartGetDouble(0,CHART_PRICE_MAX)-ChartGetDouble(0,CHART_PRICE_MIN);
+   bool chg=(sc!=g_scale || hp!=g_hpx || g_span<=0.0 || MathAbs(span-g_span)/g_span>0.02);
+   if(!chg)
+      return;
+   ulong now=GetTickCount64();
+   if(now-g_lastRedraw<400)
+      return;
+   g_lastRedraw=now;
+   DrawAll();
   }
 
 int OnCalculate(const int rates_total,

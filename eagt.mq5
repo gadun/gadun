@@ -5,9 +5,9 @@
 //|             Powered by ICT_SMC_CRT + ICT/SMC/CRT Structure       |
 //+------------------------------------------------------------------+
 #property copyright   "Copyright 2026, GT Recovery Engine"
-#property version     "1.30"
+#property version     "1.31"
 #property description "GT Recovery Engine (All-in-One): ICT+SMC+CRT Entry + Direct Flip Martingale (Buy SL->Sell, Sell SL->Buy Sampai TP)"
-#property description "1 File Standalone EA: Mode Direct Flip Saat SL (Default), Hybrid & Probability-Gated"
+#property description "1 File Standalone EA: Exact Precision RR Lock (1:2 Presisi + Post-Fill Slippage Re-Anchor)"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -2183,9 +2183,10 @@ private:
    {
       double bufPx   = pipConv.PipsToPrice(m_slBufferPips);
       double baseSL  = MathMax(5.0, m_defaultSLPips);
-      double minSLPx = pipConv.PipsToPrice(MathMax(pipConv.GetMinStopPips() + 1.0, baseSL * 0.5));
-      double maxSLPx = pipConv.PipsToPrice(MathMax(baseSL * 2.5, m_gridStepPips * 2.5));
       double rr      = (m_targetRR > 0.0) ? m_targetRR : 2.0;
+      double minSLForGrid = (rr > 0.0) ? (m_gridStepPips / rr) : m_gridStepPips;
+      double minSLPx = pipConv.PipsToPrice(MathMax(MathMax(pipConv.GetMinStopPips() + 1.0, baseSL * 0.5), minSLForGrid));
+      double maxSLPx = pipConv.PipsToPrice(MathMax(baseSL * 2.5, m_gridStepPips * 2.5));
 
       double slDistPx = pipConv.PipsToPrice(baseSL);
 
@@ -2207,7 +2208,8 @@ private:
          else
             slDistPx = MathMax(minSLPx, pipConv.PipsToPrice(baseSL));
 
-         double tpDistPx = MathMax(slDistPx * rr, pipConv.PipsToPrice(m_gridStepPips));
+         slDistPx = pipConv.NormalizePrice(slDistPx);
+         double tpDistPx = pipConv.NormalizePrice(slDistPx * rr);
          outSL = pipConv.NormalizePrice(refEntry - slDistPx);
          outTP = pipConv.NormalizePrice(refEntry + tpDistPx);
       }
@@ -2229,7 +2231,8 @@ private:
          else
             slDistPx = MathMax(minSLPx, pipConv.PipsToPrice(baseSL));
 
-         double tpDistPx = MathMax(slDistPx * rr, pipConv.PipsToPrice(m_gridStepPips));
+         slDistPx = pipConv.NormalizePrice(slDistPx);
+         double tpDistPx = pipConv.NormalizePrice(slDistPx * rr);
          outSL = pipConv.NormalizePrice(refEntry + slDistPx);
          outTP = pipConv.NormalizePrice(refEntry - tpDistPx);
       }
@@ -3350,6 +3353,7 @@ private:
    double                  m_maxSpreadPips;
    bool                    m_rejectInvalidIndTP;
    bool                    m_strictRRValidation;
+   bool                    m_enforceExactRR;
    bool                    m_enablePostSLRecovery;
    ENUM_GT_FLIP_EXEC_MODE  m_flipExecMode;
    bool                    m_flipMustEndInTP;
@@ -3380,7 +3384,7 @@ private:
    }
 
    //+----------------------------------------------------------------+
-   //| Resolve SL & TP Prices according to Mode, Indicator & RR Rules |
+   //| Resolve SL & TP Prices with Exact Precision RR Lock            |
    //+----------------------------------------------------------------+
    bool ResolveOrderSLTP(const ENUM_GT_DIR dir,
                          const double entryPrice,
@@ -3389,24 +3393,29 @@ private:
                          const CPipConverter &pipConv,
                          const SIndicatorData &ind,
                          double &outSL,
-                         double &outTP)
+                         double &outTP,
+                         double &outSLDistPx,
+                         double &outTPDistPx)
    {
-      outSL = 0.0;
-      outTP = 0.0;
+      outSL       = 0.0;
+      outTP       = 0.0;
+      outSLDistPx = 0.0;
+      outTPDistPx = 0.0;
 
-      double targetRR  = GT_ResolveRR(m_rrMode, m_customRR);
-      double minStopPx = pipConv.PipsToPrice(pipConv.GetMinStopPips() + 0.5);
-      bool   isBuy     = (dir == GT_DIR_BUY);
+      double targetRR   = GT_ResolveRR(m_rrMode, m_customRR);
+      double minStopPx  = pipConv.PipsToPrice(pipConv.GetMinStopPips() + 0.5);
+      double gridStepPx = pipConv.PipsToPrice(m_gridStepPips);
+      bool   isBuy      = (dir == GT_DIR_BUY);
 
-      double slDistPx  = 0.0;
-      double tpDistPx  = 0.0;
+      double slDistPx   = 0.0;
+      double tpDistPx   = 0.0;
 
       if(m_sltpMode == GT_SLTP_INDICATOR)
       {
-         double rawSL = isBuy ? ind.buySL : ind.sellSL;
-         double rawTP = isBuy ? ind.buyTP : ind.sellTP;
+         //--- Flip recovery orders must NEVER read stale Level-0 indicator SL/TP buffers
+         double rawSL = (!isFlipRecovery) ? (isBuy ? ind.buySL : ind.sellSL) : 0.0;
+         double rawTP = (!isFlipRecovery) ? (isBuy ? ind.buyTP : ind.sellTP) : 0.0;
 
-         //--- Check valid directional side
          bool slValid = isBuy ? (rawSL > 0.0 && rawSL < entryPrice) : (rawSL > entryPrice);
          bool tpValid = isBuy ? (rawTP > entryPrice) : (rawTP > 0.0 && rawTP < entryPrice);
 
@@ -3415,23 +3424,38 @@ private:
          else if(m_fixedSLPips > 0.0)
             slDistPx = pipConv.PipsToPrice(m_fixedSLPips);
 
-         if(tpValid)
-            tpDistPx = MathAbs(rawTP - entryPrice);
-         else if(slDistPx > 0.0)
-            tpDistPx = slDistPx * targetRR;
-         else if(m_fixedTPPips > 0.0)
-            tpDistPx = pipConv.PipsToPrice(m_fixedTPPips);
+         if(m_enforceExactRR && slDistPx > 0.0 && targetRR > 0.0)
+         {
+            //--- Lock exact RR from live entryPrice (and preserve exact RR if Grid Step raises floor)
+            if(slDistPx < minStopPx)
+               slDistPx = minStopPx;
+            double minSLForGridPx = gridStepPx / targetRR;
+            if(slDistPx < minSLForGridPx)
+               slDistPx = minSLForGridPx;
+
+            slDistPx = pipConv.NormalizePrice(slDistPx);
+            tpDistPx = pipConv.NormalizePrice(slDistPx * targetRR);
+         }
+         else
+         {
+            if(tpValid)
+               tpDistPx = MathAbs(rawTP - entryPrice);
+            else if(slDistPx > 0.0)
+               tpDistPx = slDistPx * targetRR;
+            else if(m_fixedTPPips > 0.0)
+               tpDistPx = pipConv.PipsToPrice(m_fixedTPPips);
+         }
       }
       else if(m_sltpMode == GT_SLTP_FIXED_PIP)
       {
-         slDistPx = pipConv.PipsToPrice(m_fixedSLPips);
-         tpDistPx = pipConv.PipsToPrice(m_fixedTPPips);
+         slDistPx = pipConv.NormalizePrice(pipConv.PipsToPrice(m_fixedSLPips));
+         tpDistPx = pipConv.NormalizePrice(pipConv.PipsToPrice(m_fixedTPPips));
       }
       else // GT_SLTP_RISK_REWARD
       {
          //--- Exact RR formula: TP = SL * RR (1:1, 1:2, 1:3, Custom)
          double slPips = m_fixedSLPips;
-         if(slPips <= 0.0 && ind.valid)
+         if(slPips <= 0.0 && !isFlipRecovery && ind.valid)
          {
             double rawSL = isBuy ? ind.buySL : ind.sellSL;
             bool slValid = isBuy ? (rawSL > 0.0 && rawSL < entryPrice) : (rawSL > entryPrice);
@@ -3439,11 +3463,16 @@ private:
                slPips = pipConv.PriceToPips(MathAbs(entryPrice - rawSL));
          }
          slDistPx = pipConv.PipsToPrice(slPips);
-         tpDistPx = pipConv.PipsToPrice(slPips * targetRR);
+         if(slDistPx < minStopPx)
+            slDistPx = minStopPx;
+         if(targetRR > 0.0 && slDistPx * targetRR < gridStepPx)
+            slDistPx = gridStepPx / targetRR;
+
+         slDistPx = pipConv.NormalizePrice(slDistPx);
+         tpDistPx = pipConv.NormalizePrice(slDistPx * targetRR);
       }
 
-      //--- Flip Martingale Auto-Cover Loss TP:
-      //--- Pastikan saat posisi Flip menyentuh TP, hasil akhir menutup loss siklus sebelumnya + profit
+      //--- Optional Flip Martingale Auto-Cover Loss TP (Off by default so exact 1:2 RR stays intact)
       if(isFlipRecovery && m_flipAutoCoverLossTP && m_state.realizedCyclePL < 0.0 && orderLot > 0.0)
       {
          double pipValOrder = pipConv.GetPipValuePerLot() * orderLot;
@@ -3452,7 +3481,7 @@ private:
             double needCoverPips = (MathAbs(m_state.realizedCyclePL) / pipValOrder) + MathMax(3.0, m_gridStepPips * 0.25);
             double curTPPips     = pipConv.PriceToPips(tpDistPx);
             if(needCoverPips > curTPPips)
-               tpDistPx = pipConv.PipsToPrice(needCoverPips);
+               tpDistPx = pipConv.NormalizePrice(pipConv.PipsToPrice(needCoverPips));
          }
       }
 
@@ -3480,14 +3509,26 @@ private:
          if(m_rejectInvalidIndTP)
             return false;
 
-         //--- Safe auto-clamp if rejection disabled
          if(tpPipsActual < m_gridStepPips)
-            tpDistPx = pipConv.PipsToPrice(m_gridStepPips);
+         {
+            tpDistPx = pipConv.NormalizePrice(gridStepPx);
+            if(m_enforceExactRR && targetRR > 0.0)
+               slDistPx = pipConv.NormalizePrice(tpDistPx / targetRR);
+         }
       }
 
-      //--- Enforce broker StopsLevel safely
-      if(slDistPx > 0.0 && slDistPx < minStopPx) slDistPx = minStopPx;
-      if(tpDistPx > 0.0 && tpDistPx < minStopPx) tpDistPx = minStopPx;
+      //--- Enforce broker StopsLevel safely while keeping exact RR
+      if(slDistPx > 0.0 && slDistPx < minStopPx)
+      {
+         slDistPx = pipConv.NormalizePrice(minStopPx);
+         if(m_enforceExactRR && m_sltpMode != GT_SLTP_FIXED_PIP && targetRR > 0.0)
+            tpDistPx = pipConv.NormalizePrice(slDistPx * targetRR);
+      }
+      if(tpDistPx > 0.0 && tpDistPx < minStopPx)
+         tpDistPx = pipConv.NormalizePrice(minStopPx);
+
+      outSLDistPx = slDistPx;
+      outTPDistPx = tpDistPx;
 
       if(slDistPx > 0.0)
          outSL = pipConv.NormalizePrice(isBuy ? (entryPrice - slDistPx) : (entryPrice + slDistPx));
@@ -3498,7 +3539,7 @@ private:
    }
 
    //+----------------------------------------------------------------+
-   //| Execute Market Order Helper                                    |
+   //| Execute Market Order + Post-Fill Exact Slippage Re-Anchor      |
    //+----------------------------------------------------------------+
    bool SendMarketOrder(const ENUM_GT_DIR dir,
                         const double rawLot,
@@ -3515,18 +3556,19 @@ private:
       if(executedLot <= 0.0)
          return false;
 
-      double entryPrice = (dir == GT_DIR_BUY)
+      bool   isBuy      = (dir == GT_DIR_BUY);
+      double entryPrice = isBuy
                           ? SymbolInfoDouble(m_symbol, SYMBOL_ASK)
                           : SymbolInfoDouble(m_symbol, SYMBOL_BID);
       if(entryPrice <= 0.0)
          return false;
 
-      double sl = 0.0, tp = 0.0;
-      if(!ResolveOrderSLTP(dir, entryPrice, executedLot, isFlipRecovery, pipConv, ind, sl, tp))
+      double sl = 0.0, tp = 0.0, slDistPx = 0.0, tpDistPx = 0.0;
+      if(!ResolveOrderSLTP(dir, entryPrice, executedLot, isFlipRecovery, pipConv, ind, sl, tp, slDistPx, tpDistPx))
          return false;
 
       bool ok = false;
-      if(dir == GT_DIR_BUY)
+      if(isBuy)
          ok = m_trade.Buy(executedLot, m_symbol, entryPrice, sl, tp, comment);
       else
          ok = m_trade.Sell(executedLot, m_symbol, entryPrice, sl, tp, comment);
@@ -3539,13 +3581,69 @@ private:
          return false;
       }
 
+      //--- Post-Fill Exact SL/TP Re-Anchor:
+      //--- Jika terjadi slippage saat eksekusi market order, geser SL/TP persis dari Open Price aktual
+      //--- agar rasio SL:TP (mis. 1:2.00) tetap 100% presisi sampai tick terakhir!
       executedPrice = (m_trade.ResultPrice() > 0.0) ? m_trade.ResultPrice() : entryPrice;
-      LogAction(StringFormat("OPEN %s | Lot=%.2f | Price=%s | SL=%s | TP=%s | %s",
+      double finalSL = sl;
+      double finalTP = tp;
+
+      if(slDistPx > 0.0 && tpDistPx > 0.0)
+      {
+         ulong  posTicket  = 0;
+         datetime newestOT = 0;
+         for(int i = PositionsTotal() - 1; i >= 0; i--)
+         {
+            ulong t = PositionGetTicket(i);
+            if(t == 0) continue;
+            if(PositionGetString(POSITION_SYMBOL) != m_symbol) continue;
+            if(PositionGetInteger(POSITION_MAGIC) != m_magic)  continue;
+            long pType = PositionGetInteger(POSITION_TYPE);
+            if((isBuy && pType != POSITION_TYPE_BUY) || (!isBuy && pType != POSITION_TYPE_SELL))
+               continue;
+            datetime ot = (datetime)PositionGetInteger(POSITION_TIME);
+            if(ot >= newestOT)
+            {
+               newestOT  = ot;
+               posTicket = t;
+            }
+         }
+
+         if(posTicket > 0 && PositionSelectByTicket(posTicket))
+         {
+            double fillPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+            double curSL     = PositionGetDouble(POSITION_SL);
+            double curTP     = PositionGetDouble(POSITION_TP);
+            if(fillPrice > 0.0)
+            {
+               executedPrice  = fillPrice;
+               double exactSL = pipConv.NormalizePrice(isBuy ? (fillPrice - slDistPx) : (fillPrice + slDistPx));
+               double exactTP = pipConv.NormalizePrice(isBuy ? (fillPrice + tpDistPx) : (fillPrice - tpDistPx));
+               double tickSz  = MathMax(pipConv.PointSize(), SymbolInfoDouble(m_symbol, SYMBOL_TRADE_TICK_SIZE));
+
+               if(MathAbs(exactSL - curSL) >= tickSz || MathAbs(exactTP - curTP) >= tickSz)
+               {
+                  if(m_trade.PositionModify(posTicket, exactSL, exactTP))
+                  {
+                     finalSL = exactSL;
+                     finalTP = exactTP;
+                  }
+               }
+            }
+         }
+      }
+
+      double actualSLPips = (finalSL > 0.0) ? pipConv.PriceToPips(MathAbs(executedPrice - finalSL)) : 0.0;
+      double actualTPPips = (finalTP > 0.0) ? pipConv.PriceToPips(MathAbs(finalTP - executedPrice)) : 0.0;
+      double actualRR     = (actualSLPips > 0.0) ? (actualTPPips / actualSLPips) : 0.0;
+
+      LogAction(StringFormat("OPEN %s | Lot=%.2f | Open=%s | SL=%s (%.1f pip) | TP=%s (%.1f pip) | RR=1:%.2f | %s",
                              GT_DirToString(dir),
                              executedLot,
                              DoubleToString(executedPrice, pipConv.Digits()),
-                             DoubleToString(sl, pipConv.Digits()),
-                             DoubleToString(tp, pipConv.Digits()),
+                             DoubleToString(finalSL, pipConv.Digits()), actualSLPips,
+                             DoubleToString(finalTP, pipConv.Digits()), actualTPPips,
+                             actualRR,
                              comment));
       return true;
    }
@@ -3653,10 +3751,11 @@ public:
       m_maxSpreadPips        = 0.0;
       m_rejectInvalidIndTP   = true;
       m_strictRRValidation   = false;
+      m_enforceExactRR       = true;
       m_enablePostSLRecovery = true;
       m_flipExecMode         = GT_FLIP_DIRECT_ON_SL;
       m_flipMustEndInTP      = true;
-      m_flipAutoCoverLossTP  = true;
+      m_flipAutoCoverLossTP  = false;
       m_alertsEnabled        = true;
       m_lastEntrySignalBar   = 0;
       m_lastRuntimeWarning   = "";
@@ -3682,6 +3781,7 @@ public:
              const double maxSpreadPips,
              const bool rejectInvalidIndTP,
              const bool strictRRValidation,
+             const bool enforceExactRR,
              const bool enablePostSLRecovery,
              const ENUM_GT_FLIP_EXEC_MODE flipExecMode,
              const bool flipMustEndInTP,
@@ -3705,6 +3805,7 @@ public:
       m_maxSpreadPips        = MathMax(0.0, maxSpreadPips);
       m_rejectInvalidIndTP   = rejectInvalidIndTP;
       m_strictRRValidation   = strictRRValidation;
+      m_enforceExactRR       = enforceExactRR;
       m_enablePostSLRecovery = enablePostSLRecovery;
       m_flipExecMode         = flipExecMode;
       m_flipMustEndInTP      = flipMustEndInTP;
@@ -4679,6 +4780,7 @@ input bool                    InpOnlyEntryInKillZone    = false;             // 
 input double                  InpMaxSpreadPips          = 0.0;               // Spread Maksimal dalam Pip (0 = Off)
 input bool                    InpRejectInvalidIndTP     = true;              // Tolak Order jika TP Indikator < Grid Step
 input bool                    InpStrictRRValidation     = false;             // Tolak Init/Order jika RR Tidak Sesuai (False=Warning)
+input bool                    InpEnforceExactRR         = true;              // Kunci Presisi Rasio SL:TP Sesuai RR (1:2 Tepat)
 
 input group "=== 3. Recovery Engine (Direct Flip / Hybrid / Martingale Klasik) ==="
 input ENUM_GT_FLIP_EXEC_MODE  InpFlipExecMode           = GT_FLIP_DIRECT_ON_SL; // Mode Eksekusi Flip (Default: Direct Flip Saat SL)
@@ -4689,7 +4791,7 @@ input double                  InpCustomMultiplier       = 1.6;                  
 input ENUM_GT_CLASSIC_TP_MODE InpClassicTPMode          = GT_CLASSIC_TP_BASKET; // Mode TP Martingale Klasik
 input bool                    InpEnablePostSLRecovery   = true;                 // Evaluasi Ulang Otomatis Setelah SL Terkena
 input bool                    InpFlipMustEndInTP        = true;                 // Flip Wajib Tuntas TP Sebelum Cari Sinyal Baru
-input bool                    InpFlipAutoCoverLossTP    = true;                 // Auto Sesuaikan TP Flip agar Menutup Loss Siklus
+input bool                    InpFlipAutoCoverLossTP    = false;                // Auto Perpanjang TP Flip (False = Jaga RR 1:2 Presisi)
 input bool                    InpRequireIntactForClassic= false;                // Wajib Struktur Utuh (No Opp CHoCH/BOS) untuk Klasik
 
 input group "=== 4. Sistem Skor Probabilitas (Flip vs Klasik) ==="
@@ -4948,6 +5050,7 @@ int OnInit()
                  InpMaxSpreadPips,
                  InpRejectInvalidIndTP,
                  InpStrictRRValidation,
+                 InpEnforceExactRR,
                  InpEnablePostSLRecovery,
                  InpFlipExecMode,
                  InpFlipMustEndInTP,

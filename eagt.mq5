@@ -5,9 +5,9 @@
 //|             Powered by ICT_SMC_CRT + ICT/SMC/CRT Structure       |
 //+------------------------------------------------------------------+
 #property copyright   "Copyright 2026, GT Recovery Engine"
-#property version     "1.10"
-#property description "GT Recovery Engine (All-in-One): Probability-Driven Recovery System (Martingale Klasik vs Flip Martingale)"
-#property description "1 File Standalone EA: Internal ICT+SMC+CRT Signal & Structure Engine + Opsional Eksternal iCustom"
+#property version     "1.30"
+#property description "GT Recovery Engine (All-in-One): ICT+SMC+CRT Entry + Direct Flip Martingale (Buy SL->Sell, Sell SL->Buy Sampai TP)"
+#property description "1 File Standalone EA: Mode Direct Flip Saat SL (Default), Hybrid & Probability-Gated"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -105,12 +105,20 @@ enum ENUM_GT_LOSS_MODE
    GT_LOSS_PERCENT  = 1     // Persentase Balance (%)
 };
 
-//--- Active Recovery Method Selected by Probability Engine
+//--- Active Recovery Method Selected by Engine
 enum ENUM_GT_RECOVERY_MODE
 {
    GT_REC_NONE    = 0,      // Standby (Belum Ada Recovery)
    GT_REC_CLASSIC = 1,      // Martingale Klasik (Struktur Utuh)
-   GT_REC_FLIP    = 2       // Flip Martingale (Probabilitas Reversal Tinggi)
+   GT_REC_FLIP    = 2       // Flip Martingale (Balik Arah Recovery)
+};
+
+//--- Flip Execution Mode
+enum ENUM_GT_FLIP_EXEC_MODE
+{
+   GT_FLIP_DIRECT_ON_SL = 0, // Direct Flip Saat SL (Buy SL->Sell, Sell SL->Buy Sampai TP)
+   GT_FLIP_HYBRID_LOCK  = 1, // Hybrid (Probabilitas Awal -> Begitu Flip Aktif Langsung Balik Saat SL)
+   GT_FLIP_PROB_GATED   = 2  // Probability-Gated (Setiap Recovery Cek Skor Probabilitas ICT/SMC/CRT)
 };
 
 //--- Flip Signal Tier Hierarchy
@@ -539,6 +547,7 @@ struct SSafetyStatus
 struct SRecoveryState
 {
    bool                  cycleActive;
+   bool                  flipCycleLocked;      // True saat siklus Flip aktif: WAJIB tuntas TP sebelum cari sinyal baru
    ENUM_GT_DIR           currentDir;
    int                   currentLevel;         // 0 = initial entry, 1..Max = recovery
    ENUM_GT_RECOVERY_MODE lastMode;
@@ -555,6 +564,7 @@ struct SRecoveryState
    void Reset()
    {
       cycleActive         = false;
+      flipCycleLocked     = false;
       currentDir          = GT_DIR_NONE;
       currentLevel        = 0;
       lastMode            = GT_REC_NONE;
@@ -938,6 +948,27 @@ public:
       else                     lotDigits = 3;
 
       return NormalizeDouble(norm, lotDigits);
+   }
+
+   double CalcNextRecoveryLot(const double prevLot, const double multiplier) const
+   {
+      double minLot  = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MIN);
+      double maxLot  = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_MAX);
+      double lotStep = SymbolInfoDouble(m_symbol, SYMBOL_VOLUME_STEP);
+
+      if(minLot <= 0.0)  minLot  = 0.01;
+      if(maxLot <= 0.0)  maxLot  = 100.0;
+      if(lotStep <= 0.0) lotStep = 0.01;
+
+      double base = (prevLot > 0.0) ? prevLot : minLot;
+      double raw  = base * multiplier;
+      double next = MathRound(raw / lotStep) * lotStep;
+
+      //--- Ensure true upward Martingale progression even on 0.01 micro lots when multiplier > 1.0
+      if(multiplier > 1.0 && next <= base + 1e-10)
+         next = base + lotStep;
+
+      return NormalizeLot(MathMin(maxLot, MathMax(minLot, next)));
    }
 
    double GetSpreadPips() const
@@ -3320,6 +3351,9 @@ private:
    bool                    m_rejectInvalidIndTP;
    bool                    m_strictRRValidation;
    bool                    m_enablePostSLRecovery;
+   ENUM_GT_FLIP_EXEC_MODE  m_flipExecMode;
+   bool                    m_flipMustEndInTP;
+   bool                    m_flipAutoCoverLossTP;
    bool                    m_alertsEnabled;
 
    //--- Runtime State
@@ -3350,6 +3384,8 @@ private:
    //+----------------------------------------------------------------+
    bool ResolveOrderSLTP(const ENUM_GT_DIR dir,
                          const double entryPrice,
+                         const double orderLot,
+                         const bool   isFlipRecovery,
                          const CPipConverter &pipConv,
                          const SIndicatorData &ind,
                          double &outSL,
@@ -3406,6 +3442,20 @@ private:
          tpDistPx = pipConv.PipsToPrice(slPips * targetRR);
       }
 
+      //--- Flip Martingale Auto-Cover Loss TP:
+      //--- Pastikan saat posisi Flip menyentuh TP, hasil akhir menutup loss siklus sebelumnya + profit
+      if(isFlipRecovery && m_flipAutoCoverLossTP && m_state.realizedCyclePL < 0.0 && orderLot > 0.0)
+      {
+         double pipValOrder = pipConv.GetPipValuePerLot() * orderLot;
+         if(pipValOrder > 0.0)
+         {
+            double needCoverPips = (MathAbs(m_state.realizedCyclePL) / pipValOrder) + MathMax(3.0, m_gridStepPips * 0.25);
+            double curTPPips     = pipConv.PriceToPips(tpDistPx);
+            if(needCoverPips > curTPPips)
+               tpDistPx = pipConv.PipsToPrice(needCoverPips);
+         }
+      }
+
       //--- Runtime Validation of TP vs Grid Step & RR consistency
       double slPipsActual = pipConv.PriceToPips(slDistPx);
       double tpPipsActual = pipConv.PriceToPips(tpDistPx);
@@ -3414,7 +3464,7 @@ private:
                                                                    tpPipsActual,
                                                                    m_gridStepPips,
                                                                    targetRR,
-                                                                   m_strictRRValidation);
+                                                                   m_strictRRValidation && !isFlipRecovery);
       if(vr.hasWarning)
       {
          m_lastRuntimeWarning = vr.warningMessage;
@@ -3452,6 +3502,7 @@ private:
    //+----------------------------------------------------------------+
    bool SendMarketOrder(const ENUM_GT_DIR dir,
                         const double rawLot,
+                        const bool   isFlipRecovery,
                         const CPipConverter &pipConv,
                         const SIndicatorData &ind,
                         const string comment,
@@ -3471,7 +3522,7 @@ private:
          return false;
 
       double sl = 0.0, tp = 0.0;
-      if(!ResolveOrderSLTP(dir, entryPrice, pipConv, ind, sl, tp))
+      if(!ResolveOrderSLTP(dir, entryPrice, executedLot, isFlipRecovery, pipConv, ind, sl, tp))
          return false;
 
       bool ok = false;
@@ -3603,6 +3654,9 @@ public:
       m_rejectInvalidIndTP   = true;
       m_strictRRValidation   = false;
       m_enablePostSLRecovery = true;
+      m_flipExecMode         = GT_FLIP_DIRECT_ON_SL;
+      m_flipMustEndInTP      = true;
+      m_flipAutoCoverLossTP  = true;
       m_alertsEnabled        = true;
       m_lastEntrySignalBar   = 0;
       m_lastRuntimeWarning   = "";
@@ -3629,6 +3683,9 @@ public:
              const bool rejectInvalidIndTP,
              const bool strictRRValidation,
              const bool enablePostSLRecovery,
+             const ENUM_GT_FLIP_EXEC_MODE flipExecMode,
+             const bool flipMustEndInTP,
+             const bool flipAutoCoverLossTP,
              const bool alertsEnabled)
    {
       m_symbol               = symbol;
@@ -3649,6 +3706,9 @@ public:
       m_rejectInvalidIndTP   = rejectInvalidIndTP;
       m_strictRRValidation   = strictRRValidation;
       m_enablePostSLRecovery = enablePostSLRecovery;
+      m_flipExecMode         = flipExecMode;
+      m_flipMustEndInTP      = flipMustEndInTP;
+      m_flipAutoCoverLossTP  = flipAutoCoverLossTP;
       m_alertsEnabled        = alertsEnabled;
 
       m_trade.SetExpertMagicNumber(m_magic);
@@ -3751,12 +3811,13 @@ public:
             }
          }
 
-         m_state.cycleActive    = true;
-         m_state.currentDir     = dir;
-         m_state.currentLevel   = MathMax(m_state.currentLevel, parsedMaxLv);
-         m_state.lastMode       = parsedMode;
-         m_state.lastEntryPrice = lastPx;
-         m_state.lastLot        = lastLot;
+         m_state.cycleActive     = true;
+         m_state.flipCycleLocked = (parsedMode == GT_REC_FLIP) ? true : m_state.flipCycleLocked;
+         m_state.currentDir      = dir;
+         m_state.currentLevel    = MathMax(m_state.currentLevel, parsedMaxLv);
+         m_state.lastMode        = parsedMode;
+         m_state.lastEntryPrice  = lastPx;
+         m_state.lastLot         = lastLot;
       }
    }
 
@@ -3821,11 +3882,14 @@ public:
       long   dealReason = HistoryDealGetInteger(dealTicket, DEAL_REASON);
       long   dealType   = HistoryDealGetInteger(dealTicket, DEAL_TYPE);
       double dealPrice  = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
+      double dealVol    = HistoryDealGetDouble(dealTicket, DEAL_VOLUME);
 
       //--- Closing deal of a BUY is DEAL_TYPE_SELL; closing deal of a SELL is DEAL_TYPE_BUY
       ENUM_GT_DIR closedPosDir = (dealType == DEAL_TYPE_SELL) ? GT_DIR_BUY : GT_DIR_SELL;
 
       m_state.realizedCyclePL += dealPL;
+      if(dealVol > m_state.lastLot)
+         m_state.lastLot = dealVol;
 
       //--- If closing deliberately as part of a Flip transition, do not reset or arm Post-SL flag
       if(m_isFlipClosing)
@@ -3838,19 +3902,62 @@ public:
 
       if(openCount == 0)
       {
-         //--- Full cycle closed in profit or breakeven -> Reset Recovery Cycle!
-         if(m_state.realizedCyclePL >= 0.0 || dealReason == DEAL_REASON_TP)
+         bool directOnSL = (m_flipExecMode == GT_FLIP_DIRECT_ON_SL);
+         bool flipLocked = (m_flipMustEndInTP && m_state.flipCycleLocked);
+
+         //--- 1. TP TERCAPAI -> Siklus TUNTAS! Reset ke Level 0 & izinkan mencari sinyal ICT/SMC/CRT baru
+         if(dealReason == DEAL_REASON_TP)
          {
-            LogAction(StringFormat("CYCLE SELESAI PROFIT (Net=%.2f) -> Reset ke Level 0.", m_state.realizedCyclePL));
+            LogAction(StringFormat("%s TUNTAS TP! (Deal=%+.2f | Net Cycle=%+.2f) -> Reset ke Level 0, diizinkan mencari sinyal baru.",
+                                   (m_state.flipCycleLocked || directOnSL) ? "FLIP MARTINGALE" : "CYCLE",
+                                   dealPL, m_state.realizedCyclePL));
+            m_state.Reset();
+            return;
+         }
+
+         //--- 2. MODE DIRECT FLIP SAAT SL:
+         //--- Buy kena SL -> langsung kunci Flip & siap buka Sell lot Martingale
+         //--- Sell kena SL -> langsung kunci Flip & siap buka Buy lot Martingale
+         if(directOnSL && (dealReason == DEAL_REASON_SL || dealPL < 0.0 || m_state.flipCycleLocked))
+         {
+            ENUM_GT_DIR nextFlipDir = (closedPosDir == GT_DIR_BUY) ? GT_DIR_SELL : GT_DIR_BUY;
+            m_state.cycleActive         = true;
+            m_state.flipCycleLocked     = true;
+            m_state.pendingPostSLReEval = true;
+            m_state.lastLostDir         = closedPosDir;
+            m_state.lastLostPrice       = dealPrice;
+            LogAction(StringFormat("DIRECT FLIP: %s kena SL (%+.2f | Cycle=%+.2f) -> Langsung balik arah ke %s (lot Martingale) menuju TP!",
+                                   GT_DirToString(closedPosDir), dealPL, m_state.realizedCyclePL,
+                                   GT_DirToString(nextFlipDir)));
+            return;
+         }
+
+         //--- 3. SIKLUS FLIP TERKUNCI (HYBRID / PROB-GATED): WAJIB TUNTAS TP
+         if(flipLocked)
+         {
+            m_state.cycleActive         = true;
+            m_state.flipCycleLocked     = true;
+            m_state.pendingPostSLReEval = true;
+            m_state.lastLostDir         = closedPosDir;
+            m_state.lastLostPrice       = dealPrice;
+            LogAction(StringFormat("FLIP BELUM TP (%s Closed %+.2f | Cycle=%+.2f) -> Siklus Flip TERKUNCI, lanjut recovery menuju TP.",
+                                   GT_DirToString(closedPosDir), dealPL, m_state.realizedCyclePL));
+            return;
+         }
+
+         //--- 4. Siklus normal / Martingale Klasik
+         if(m_state.realizedCyclePL >= 0.0)
+         {
+            LogAction(StringFormat("CYCLE SELESAI PROFIT (Net=%+.2f) -> Reset ke Level 0 (Siap cari sinyal baru).",
+                                   m_state.realizedCyclePL));
             m_state.Reset();
          }
          else if(m_enablePostSLRecovery && dealPL < 0.0 && m_state.cycleActive)
          {
-            //--- Loss DOES NOT blindly open recovery; it triggers Probability Re-Evaluation!
             m_state.pendingPostSLReEval = true;
             m_state.lastLostDir         = closedPosDir;
             m_state.lastLostPrice       = dealPrice;
-            LogAction(StringFormat("POSISI %s CLOSED LOSS (%.2f | Cycle=%.2f) -> Memicu Evaluasi Ulang Probabilitas.",
+            LogAction(StringFormat("POSISI %s CLOSED LOSS (%+.2f | Cycle=%+.2f) -> Memicu Evaluasi Ulang Probabilitas.",
                                    GT_DirToString(closedPosDir), dealPL, m_state.realizedCyclePL));
          }
          else
@@ -3898,30 +4005,65 @@ public:
       datetime curBarTime = iTime(m_symbol, m_tf, 0);
 
       //================================================================
-      // BRANCH 1: POST-SL LOSS RE-EVALUATION (0 open pos, cycle in loss)
+      // BRANCH 1: POST-SL RECOVERY (DIRECT FLIP / HYBRID / PROB-GATED)
       //================================================================
       if(openCount == 0 && m_state.pendingPostSLReEval)
       {
          int nextLevel = m_state.currentLevel + 1;
          if(!safety.CanExecuteRecovery(nextLevel, true))
+            return;
+
+         bool useDirectFlipNow = (m_flipExecMode == GT_FLIP_DIRECT_ON_SL) ||
+                                 (m_flipExecMode == GT_FLIP_HYBRID_LOCK && m_state.flipCycleLocked);
+
+         double nextLot = pipConv.CalcNextRecoveryLot(m_state.lastLot, m_multiplier);
+         double execPx = 0.0, execLot = 0.0;
+
+         if(useDirectFlipNow)
          {
-            //--- Max level / safety reached -> end cycle cleanly without opening further orders
+            //--- DIRECT ALTERNATING FLIP SAAT SL:
+            //--- Buy kena SL -> langsung Sell lot Martingale
+            //--- Sell kena SL -> langsung Buy lot Martingale (terus sampai TP!)
+            ENUM_GT_DIR flipDir = (m_state.lastLostDir == GT_DIR_BUY) ? GT_DIR_SELL : GT_DIR_BUY;
+            string tag = StringFormat("GT_FLIP_L%d", nextLevel);
+
+            if(SendMarketOrder(flipDir, nextLot, true, pipConv, ind, tag, execPx, execLot))
+            {
+               m_state.cycleActive         = true;
+               m_state.flipCycleLocked     = true;
+               m_state.currentDir          = flipDir;
+               m_state.currentLevel        = nextLevel;
+               m_state.lastMode            = GT_REC_FLIP;
+               m_state.lastEntryPrice      = execPx;
+               m_state.lastLot             = execLot;
+               m_state.lastActionBarTime   = curBarTime;
+               m_state.pendingPostSLReEval = false;
+               m_state.flipCount++;
+
+               //--- Keep probability dashboard informative for the newly opened Flip direction
+               probEngine.Evaluate(flipDir, ctx, ind);
+               LogAction(StringFormat("DIRECT FLIP EXECUTED: %s SL -> Langsung %s | Lot=%.2f | Level=%d [WAJIB TP]",
+                                      GT_DirToString(m_state.lastLostDir),
+                                      GT_DirToString(flipDir), execLot, nextLevel));
+            }
             return;
          }
 
+         //--- Probability-Gated / Pre-Flip Hybrid Evaluation
          SProbabilityDecision dec = probEngine.Evaluate(m_state.lastLostDir, ctx, ind);
          if(!dec.allowExecution)
             return;
 
-         double nextLot = pipConv.NormalizeLot(m_state.lastLot * m_multiplier);
-         double execPx = 0.0, execLot = 0.0;
+         bool   isFlipOrder = (dec.mode == GT_REC_FLIP || m_state.flipCycleLocked);
          string tag = (dec.mode == GT_REC_FLIP)
                       ? StringFormat("GT_FLIP_L%d", nextLevel)
                       : StringFormat("GT_CLASSIC_L%d", nextLevel);
 
-         if(SendMarketOrder(dec.recommendedDir, nextLot, pipConv, ind, tag, execPx, execLot))
+         if(SendMarketOrder(dec.recommendedDir, nextLot, isFlipOrder, pipConv, ind, tag, execPx, execLot))
          {
             m_state.cycleActive         = true;
+            if(dec.mode == GT_REC_FLIP)
+               m_state.flipCycleLocked  = true;
             m_state.currentDir          = dec.recommendedDir;
             m_state.currentLevel        = nextLevel;
             m_state.lastMode            = dec.mode;
@@ -3942,6 +4084,10 @@ public:
       //================================================================
       if(openCount == 0)
       {
+         //--- Filosofi Flip Martingale: dilarang mencari sinyal baru selama siklus Flip belum tuntas TP!
+         if(m_flipMustEndInTP && m_state.flipCycleLocked)
+            return;
+
          if(!safety.CanOpenNewEntry())
             return;
 
@@ -3961,7 +4107,7 @@ public:
             return;
 
          double execPx = 0.0, execLot = 0.0;
-         if(SendMarketOrder(entryDir, m_initialLot, pipConv, ind, "GT_ENTRY_L0", execPx, execLot))
+         if(SendMarketOrder(entryDir, m_initialLot, false, pipConv, ind, "GT_ENTRY_L0", execPx, execLot))
          {
             m_lastEntrySignalBar        = ind.barTime;
             m_state.Reset();
@@ -3985,6 +4131,12 @@ public:
       //--- Always refresh live probability snapshot for dashboard visibility
       SProbabilityDecision liveDec = probEngine.Evaluate(openDir, ctx, ind);
 
+      //--- Pada mode Direct Flip Saat SL (atau Hybrid yang sudah masuk siklus Flip),
+      //--- biarkan posisi tunggal selesai bersih ke SL atau TP tanpa menumpuk grid Klasik sebelum SL.
+      if(m_flipExecMode == GT_FLIP_DIRECT_ON_SL ||
+         (m_flipExecMode == GT_FLIP_HYBRID_LOCK && m_state.flipCycleLocked))
+         return;
+
       //--- Measure adverse distance from last entry price (Grid Step trigger)
       double bid = SymbolInfoDouble(m_symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
@@ -4004,7 +4156,7 @@ public:
          return;
 
       int nextLevel = m_state.currentLevel + 1;
-      double nextLot = pipConv.NormalizeLot(m_state.lastLot * m_multiplier);
+      double nextLot = pipConv.CalcNextRecoveryLot(m_state.lastLot, m_multiplier);
 
       if(liveDec.mode == GT_REC_FLIP)
       {
@@ -4025,9 +4177,10 @@ public:
 
          double execPx = 0.0, execLot = 0.0;
          string tag = StringFormat("GT_FLIP_L%d", nextLevel);
-         if(SendMarketOrder(liveDec.recommendedDir, nextLot, pipConv, ind, tag, execPx, execLot))
+         if(SendMarketOrder(liveDec.recommendedDir, nextLot, true, pipConv, ind, tag, execPx, execLot))
          {
             m_state.cycleActive         = true;
+            m_state.flipCycleLocked     = true;
             m_state.currentDir          = liveDec.recommendedDir;
             m_state.currentLevel        = nextLevel;
             m_state.lastMode            = GT_REC_FLIP;
@@ -4048,7 +4201,7 @@ public:
 
          double execPx = 0.0, execLot = 0.0;
          string tag = StringFormat("GT_CLASSIC_L%d", nextLevel);
-         if(SendMarketOrder(openDir, nextLot, pipConv, ind, tag, execPx, execLot))
+         if(SendMarketOrder(openDir, nextLot, m_state.flipCycleLocked, pipConv, ind, tag, execPx, execLot))
          {
             m_state.cycleActive         = true;
             m_state.currentDir          = openDir;
@@ -4250,7 +4403,7 @@ public:
          if(lv == 0)
             curLot = m.initialLot;
          else
-            curLot = pipConv.NormalizeLot(curLot * m.multiplier);
+            curLot = pipConv.CalcNextRecoveryLot(curLot, m.multiplier);
 
          levelLots[lv] = curLot;
          totalExp     += curLot;
@@ -4429,12 +4582,14 @@ public:
                "PROBABILITY & RECOVERY ENGINE", clrAccent, 8, "Segoe UI Bold");
       rowY = sec3Y + 22;
 
-      color modeClr = (state.lastMode == GT_REC_FLIP) ? colAmber :
+      color modeClr = (state.lastMode == GT_REC_FLIP || state.flipCycleLocked) ? colAmber :
                       ((state.lastMode == GT_REC_CLASSIC) ? clrAccent : clrMuted);
+      string flipLockTag = state.flipCycleLocked ? " [WAJIB TP]" : "";
       SetLabel(GT_OBJ_PREFIX + "REC_MODE", x + 16, rowY,
-               StringFormat("Engine Mode : %s (Lv %d | Dir: %s)",
+               StringFormat("Mode: %s (Lv%d %s)%s",
                             GT_RecoveryModeToString(state.lastMode),
-                            state.currentLevel, GT_DirToString(state.currentDir)), modeClr, 8);
+                            state.currentLevel, GT_DirToString(state.currentDir),
+                            flipLockTag), modeClr, 8);
       rowY += lh;
 
       SetLabel(GT_OBJ_PREFIX + "REC_POS", x + 16, rowY,
@@ -4525,14 +4680,17 @@ input double                  InpMaxSpreadPips          = 0.0;               // 
 input bool                    InpRejectInvalidIndTP     = true;              // Tolak Order jika TP Indikator < Grid Step
 input bool                    InpStrictRRValidation     = false;             // Tolak Init/Order jika RR Tidak Sesuai (False=Warning)
 
-input group "=== 3. Recovery Engine (Martingale Klasik & Flip) ==="
-input ENUM_GT_GRID_STEP       InpGridStepMode           = GT_GRID_20_PIP;    // Pilihan Grid Step
-input double                  InpCustomGridStepPips     = 25.0;              // Custom Grid Step (Pip)
-input ENUM_GT_LOT_MULT        InpMultiplierMode         = GT_MULT_1_5;       // Pilihan Multiplier Lot
-input double                  InpCustomMultiplier       = 1.6;               // Custom Multiplier Lot
+input group "=== 3. Recovery Engine (Direct Flip / Hybrid / Martingale Klasik) ==="
+input ENUM_GT_FLIP_EXEC_MODE  InpFlipExecMode           = GT_FLIP_DIRECT_ON_SL; // Mode Eksekusi Flip (Default: Direct Flip Saat SL)
+input ENUM_GT_GRID_STEP       InpGridStepMode           = GT_GRID_20_PIP;       // Pilihan Grid Step
+input double                  InpCustomGridStepPips     = 25.0;                 // Custom Grid Step (Pip)
+input ENUM_GT_LOT_MULT        InpMultiplierMode         = GT_MULT_1_5;          // Pilihan Multiplier Lot
+input double                  InpCustomMultiplier       = 1.6;                  // Custom Multiplier Lot
 input ENUM_GT_CLASSIC_TP_MODE InpClassicTPMode          = GT_CLASSIC_TP_BASKET; // Mode TP Martingale Klasik
-input bool                    InpEnablePostSLRecovery   = true;              // Evaluasi Ulang Otomatis Setelah SL Terkena
-input bool                    InpRequireIntactForClassic= false;             // Wajib Struktur Utuh (No Opp CHoCH/BOS) untuk Klasik
+input bool                    InpEnablePostSLRecovery   = true;                 // Evaluasi Ulang Otomatis Setelah SL Terkena
+input bool                    InpFlipMustEndInTP        = true;                 // Flip Wajib Tuntas TP Sebelum Cari Sinyal Baru
+input bool                    InpFlipAutoCoverLossTP    = true;                 // Auto Sesuaikan TP Flip agar Menutup Loss Siklus
+input bool                    InpRequireIntactForClassic= false;                // Wajib Struktur Utuh (No Opp CHoCH/BOS) untuk Klasik
 
 input group "=== 4. Sistem Skor Probabilitas (Flip vs Klasik) ==="
 input bool                    InpUseScoreSystem         = true;              // Aktifkan Sistem Skor (False = Mode Hierarki Tier)
@@ -4791,6 +4949,9 @@ int OnInit()
                  InpRejectInvalidIndTP,
                  InpStrictRRValidation,
                  InpEnablePostSLRecovery,
+                 InpFlipExecMode,
+                 InpFlipMustEndInTP,
+                 InpFlipAutoCoverLossTP,
                  InpEnableAlerts);
 
    //--- 9. Initialize Recovery Simulator Panel & Render Immediately
